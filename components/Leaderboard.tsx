@@ -4,7 +4,19 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Region, User } from '../types';
 import { REGIONS } from '../constants';
 import { UserService } from '../storage';
-import { Trophy, Crown, Medal, ChevronLeft, ChevronRight, Globe2, Target, AlertCircle } from 'lucide-react';
+import { 
+  Trophy, 
+  Crown, 
+  ChevronLeft, 
+  ChevronRight, 
+  Globe2, 
+  Target, 
+  AlertCircle, 
+  Triangle, 
+  Circle, 
+  Square, 
+  X 
+} from 'lucide-react';
 
 interface Props {
   userRegion?: Region;
@@ -14,15 +26,39 @@ interface Props {
 export const Leaderboard: React.FC<Props> = ({ userRegion, t }) => {
   const [activeTab, setActiveTab] = useState<'global' | 'regional'>('regional');
   const [selectedRegionFilter, setSelectedRegionFilter] = useState<Region>(userRegion || Region.TURKEY);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadingText, setLoadingText] = useState('INITIALIZING SYSTEM');
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   
   // Real data state
   const [users, setUsers] = useState<User[]>([]);
 
   useEffect(() => {
-    // Load users from "Backend"
-    setUsers(UserService.getAllUsers());
+    const loadData = async () => {
+      setIsLoading(true);
+      // Minimum artificial delay to show off the cool animation
+      const minDelay = new Promise(resolve => setTimeout(resolve, 2000));
+      const dataPromise = UserService.getAllUsers();
+      
+      const [fetchedUsers] = await Promise.all([dataPromise, minDelay]);
+      
+      setUsers(fetchedUsers);
+      setIsLoading(false);
+    };
+    loadData();
   }, []);
+
+  useEffect(() => {
+    if (isLoading) {
+      const texts = ['ESTABLISHING UPLINK', 'VERIFYING CREDENTIALS', 'SYNCHRONIZING DATA', 'DECRYPTING RECORDS'];
+      let i = 0;
+      const interval = setInterval(() => {
+        setLoadingText(texts[i]);
+        i = (i + 1) % texts.length;
+      }, 800);
+      return () => clearInterval(interval);
+    }
+  }, [isLoading]);
 
   const filteredData = useMemo(() => {
     if (activeTab === 'global') {
@@ -142,8 +178,97 @@ export const Leaderboard: React.FC<Props> = ({ userRegion, t }) => {
           )}
       </div>
 
-      {users.length === 0 ? (
-          <div className="text-center py-20 opacity-50">
+      {isLoading ? (
+        <div className="w-full min-h-[500px] flex flex-col items-center justify-center relative bg-[#0f172a]/40 rounded-3xl border border-white/5 backdrop-blur-xl overflow-hidden shadow-2xl">
+           
+           {/* Background Pulse */}
+           <motion.div 
+             className="absolute inset-0 bg-gradient-to-b from-blue-900/10 to-transparent"
+             animate={{ opacity: [0.5, 0.8, 0.5] }}
+             transition={{ duration: 3, repeat: Infinity }}
+           />
+           
+           {/* Animated Grid Background */}
+           <div className="absolute inset-0 opacity-20 bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:50px_50px] [mask-image:radial-gradient(ellipse_at_center,black_50%,transparent_90%)]" />
+           
+           {/* Central Rotating HUD Ring */}
+           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] border border-white/5 rounded-full flex items-center justify-center">
+                <motion.div 
+                    className="absolute inset-0 border-t border-l border-blue-500/20 rounded-full"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
+                />
+                <motion.div 
+                    className="absolute inset-4 border-b border-r border-purple-500/20 rounded-full"
+                    animate={{ rotate: -360 }}
+                    transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+                />
+           </div>
+
+           {/* Floating Shapes */}
+           <div className="flex items-center justify-center gap-12 mb-12 z-10 relative">
+              {/* Connecting Line */}
+              <div className="absolute top-1/2 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent -z-10" />
+              
+              {[
+                { Icon: Triangle, color: 'text-green-400', shadow: 'shadow-green-500/50', delay: 0 },
+                { Icon: Circle, color: 'text-red-400', shadow: 'shadow-red-500/50', delay: 0.2 },
+                { Icon: X, color: 'text-blue-400', shadow: 'shadow-blue-500/50', delay: 0.4 },
+                { Icon: Square, color: 'text-pink-400', shadow: 'shadow-pink-500/50', delay: 0.6 },
+              ].map(({ Icon, color, shadow, delay }, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, scale: 0 }}
+                    animate={{ 
+                        opacity: [0.4, 1, 0.4], 
+                        scale: [1, 1.2, 1],
+                        y: [0, -10, 0]
+                    }}
+                    transition={{ 
+                        duration: 2, 
+                        repeat: Infinity, 
+                        delay: delay,
+                        ease: "easeInOut"
+                    }}
+                    className="relative group"
+                  >
+                      <div className={`absolute inset-0 bg-current blur-xl opacity-20 ${color}`} />
+                      <Icon className={`w-12 h-12 ${color} drop-shadow-[0_0_10px_currentColor]`} strokeWidth={2.5} />
+                  </motion.div>
+              ))}
+           </div>
+           
+           {/* Loading Text & Bar */}
+           <div className="flex flex-col items-center z-10 w-64">
+               <AnimatePresence mode="wait">
+                 <motion.h3 
+                    key={loadingText}
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -5 }}
+                    transition={{ duration: 0.2 }}
+                    className="text-lg font-display font-bold text-white tracking-[0.2em] text-center h-8 min-w-[280px]"
+                 >
+                    {loadingText}
+                 </motion.h3>
+               </AnimatePresence>
+               
+               <div className="mt-4 w-full h-1 bg-white/10 rounded-full overflow-hidden relative">
+                  <motion.div 
+                     className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-500 to-transparent w-1/2 blur-[2px]"
+                     animate={{ x: ['-100%', '200%'] }}
+                     transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  />
+               </div>
+               
+               <div className="mt-2 flex justify-between w-full text-[10px] font-mono text-slate-500">
+                   <span>00.01.45</span>
+                   <span>SECURE_NET</span>
+               </div>
+           </div>
+        </div>
+      ) : users.length === 0 ? (
+          <div className="text-center py-20 opacity-50 bg-white/5 rounded-2xl border border-white/5">
               <AlertCircle className="w-12 h-12 text-slate-500 mx-auto mb-4" />
               <h3 className="text-xl font-display font-bold text-white mb-2">NO DATA FOUND</h3>
               <p className="text-slate-400">Be the first to register in this sector.</p>
@@ -279,27 +404,41 @@ export const Leaderboard: React.FC<Props> = ({ userRegion, t }) => {
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: index * 0.03 }}
                         className="group relative overflow-hidden"
+                        whileHover={{ 
+                            scale: 1.02,
+                            backgroundColor: "rgba(30, 58, 138, 0.2)",
+                            transition: { duration: 0.2 }
+                        }}
                     >
+                        {/* Hover Highlight Line */}
+                        <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-[0_0_10px_#3b82f6]" />
+                        
+                        {/* Hover Scanline */}
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-400/10 to-transparent -skew-x-12 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-700 ease-out pointer-events-none" />
+
                         {/* Row Card */}
-                        <div className="grid grid-cols-12 items-center p-4 rounded-xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.08] hover:border-white/10 hover:shadow-lg hover:shadow-blue-900/20 transition-all duration-200">
+                        <div className="grid grid-cols-12 items-center p-4 rounded-xl bg-white/[0.03] border border-white/5 group-hover:border-blue-500/40 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.1)] transition-all duration-300 cursor-default relative z-10">
                             
                             {/* Rank */}
-                            <div className="col-span-1 font-mono text-slate-500 font-bold text-lg group-hover:text-white transition-colors">
+                            <div className="col-span-1 font-mono text-slate-500 font-bold text-lg group-hover:text-blue-400 transition-colors duration-300 group-hover:scale-110 origin-left">
                                 {index + 4}
                             </div>
 
                             {/* User Info */}
                             <div className="col-span-5 md:col-span-6 flex items-center gap-4">
-                                <img 
-                                    src={user.avatarUrl} 
-                                    className="w-10 h-10 rounded-full bg-slate-800 object-cover grayscale group-hover:grayscale-0 transition-all ring-2 ring-transparent group-hover:ring-blue-500/50" 
-                                    alt="" 
-                                />
+                                <div className="relative">
+                                    <img 
+                                        src={user.avatarUrl} 
+                                        className="w-10 h-10 rounded-full bg-slate-800 object-cover grayscale group-hover:grayscale-0 transition-all duration-500 ring-2 ring-transparent group-hover:ring-blue-500/50 group-hover:scale-110 relative z-10" 
+                                        alt="" 
+                                    />
+                                    <div className="absolute inset-0 bg-blue-500/30 rounded-full blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                                </div>
                                 <div className="flex flex-col">
-                                    <span className="font-bold text-slate-200 group-hover:text-white transition-colors text-sm md:text-base">
+                                    <span className="font-bold text-slate-200 group-hover:text-white transition-colors text-sm md:text-base group-hover:translate-x-1 transition-transform duration-300 font-display tracking-wide">
                                         {user.discordUsername}
                                     </span>
-                                    <span className="text-xs text-slate-500 group-hover:text-slate-400">
+                                    <span className="text-xs text-slate-500 group-hover:text-blue-400/70 transition-colors font-mono">
                                         {user.twitterHandle}
                                     </span>
                                 </div>
@@ -308,16 +447,16 @@ export const Leaderboard: React.FC<Props> = ({ userRegion, t }) => {
                             {/* Region Flag (Global Only) */}
                             {activeTab === 'global' && (
                                 <div className="col-span-2 hidden md:flex justify-center">
-                                    <div className="bg-black/30 p-1.5 rounded flex items-center gap-2 border border-white/5 group-hover:border-white/10">
+                                    <div className="bg-black/30 p-1.5 rounded flex items-center gap-2 border border-white/5 group-hover:border-blue-500/30 transition-colors">
                                         <img src={REGIONS.find(r => r.id === user.region)?.image} className="w-5 h-4 object-cover rounded-[2px]" alt="" />
-                                        <span className="text-xs text-slate-400 font-display">{user.region.substring(0,3).toUpperCase()}</span>
+                                        <span className="text-xs text-slate-400 group-hover:text-blue-300 font-display">{user.region.substring(0,3).toUpperCase()}</span>
                                     </div>
                                 </div>
                             )}
 
                             {/* Score */}
                             <div className={`col-span-6 md:col-span-3 text-right ${activeTab === 'global' ? 'md:col-span-3' : 'md:col-span-5'}`}>
-                                <span className="font-display font-bold text-lg md:text-xl text-blue-400 group-hover:text-blue-300 transition-colors tabular-nums tracking-wider">
+                                <span className="font-display font-bold text-lg md:text-xl text-blue-400 group-hover:text-blue-300 transition-colors tabular-nums tracking-wider group-hover:shadow-blue-500/50 text-glow-blue">
                                     {user.mindshareScore.toLocaleString()}
                                 </span>
                             </div>

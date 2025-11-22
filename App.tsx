@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ViewState, Region, LanguageCode } from './types';
 import { AnimatedBackground } from './components/AnimatedBackground';
 import { LandingPage } from './components/LandingPage';
@@ -8,6 +8,7 @@ import { RegistrationForm } from './components/RegistrationForm';
 import { Leaderboard } from './components/Leaderboard';
 import { BrainCircuit, ChevronRight, AlertCircle, LogIn, Globe } from 'lucide-react';
 import { LANGUAGES, getTranslation } from './translations';
+import { SessionService } from './storage';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('LANDING');
@@ -17,6 +18,15 @@ const App: React.FC = () => {
   const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
 
   const t = (key: string) => getTranslation(language, key);
+
+  useEffect(() => {
+    // Check for existing session on mount
+    const session = SessionService.getSession();
+    if (session) {
+      setSelectedRegion(session.region);
+      setView('LEADERBOARD');
+    }
+  }, []);
 
   const handleRegionSelect = (region: Region) => {
     setSelectedRegion(region);
@@ -28,12 +38,17 @@ const App: React.FC = () => {
   };
 
   const handleLogoClick = () => {
+    // When clicking logo, we don't necessarily logout, just go to landing.
+    // However, if persistent login is active, they might be redirected back if we had logic in Landing.
+    // For now, allow them to see Landing page.
     setView('LANDING');
     setSelectedRegion(undefined);
   };
 
   const handleChangeRegion = () => {
     if (!hasChangedRegion) {
+      // Clear session so user can register again or change region permanently
+      SessionService.clearSession();
       setHasChangedRegion(true);
       setView('REGION_SELECT');
       setSelectedRegion(undefined);

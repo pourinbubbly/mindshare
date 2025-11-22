@@ -1,57 +1,127 @@
 
 import { User, Region } from './types';
 
-const STORAGE_KEY = 'nexus_users_db_v1';
+// CHANGED: Port 8080 -> 5000
+const API_URL = 'http://localhost:5000/api';
+const LOCAL_STORAGE_KEY = 'mindshare_nexus_db_v1';
+const SESSION_KEY = 'mindshare_nexus_session_v1';
 
-// Initial seed data to ensure leaderboard isn't completely empty for first-time viewers
-// (Optional: You can remove this if you want it 100% empty)
-const SEED_USERS: User[] = [];
+// Helper functions for LocalStorage Fallback
+// This ensures the app works even if the Node.js backend isn't running
+const getLocalDB = (): User[] => {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveLocalDB = (users: User[]) => {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(users));
+  } catch (e) {
+    console.error("LocalStorage quota exceeded or disabled", e);
+  }
+};
+
+export interface UserSession {
+  discordUsername: string;
+  region: Region;
+}
+
+export const SessionService = {
+  saveSession: (session: UserSession) => {
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    } catch (e) {
+      console.error('Failed to save session', e);
+    }
+  },
+  getSession: (): UserSession | null => {
+    try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  },
+  clearSession: () => {
+    localStorage.removeItem(SESSION_KEY);
+  }
+};
 
 export const UserService = {
-  // Fetch all users from local storage
-  getAllUsers: (): User[] => {
+  // Fetch all users from the Backend API
+  // Falls back to LocalStorage if backend is offline
+  getAllUsers: async (): Promise<User[]> => {
     try {
-      const data = localStorage.getItem(STORAGE_KEY);
-      if (!data) return SEED_USERS;
-      return JSON.parse(data);
+      // Try fetching from real backend with a short timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1500); // 1.5s timeout to prevent UI lag
+      
+      const response = await fetch(`${API_URL}/users`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch users from backend');
+      }
+      const data = await response.json();
+      
+      // Sync Backend Data to LocalStorage for redundancy
+      saveLocalDB(data);
+      
+      return data;
     } catch (e) {
-      console.error('Failed to load users', e);
-      return [];
+      console.warn('Backend unreachable (offline or blocked), switching to LocalStorage mode.');
+      // Fallback: Get from LocalStorage
+      return getLocalDB().sort((a, b) => b.mindshareScore - a.mindshareScore);
     }
   },
 
-  // Check if a Discord ID is already registered (Case insensitive)
-  checkDiscordExists: (discordId: string): boolean => {
-    const users = UserService.getAllUsers();
-    return users.some(u => u.discordUsername.toLowerCase().trim() === discordId.toLowerCase().trim());
+  // Check if a Discord ID is already registered
+  checkDiscordExists: async (discordId: string): Promise<boolean> => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+
+      const response = await fetch(`${API_URL}/users/check/${encodeURIComponent(discordId)}`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) throw new Error('Backend check failed');
+      const data = await response.json();
+      return data.exists;
+    } catch (e) {
+      // Fallback
+      const users = getLocalDB();
+      return users.some(u => u.discordUsername.toLowerCase() === discordId.toLowerCase());
+    }
   },
 
   // Save a new user or update existing
-  registerUser: (user: User): void => {
-    const users = UserService.getAllUsers();
-    const existingIndex = users.findIndex(u => u.discordUsername === user.discordUsername);
-    
+  registerUser: async (user: User): Promise<void> => {
+    // 1. ALWAYS save to LocalStorage first as a fail-safe.
+    // This ensures that if the backend fetch fails or hangs, the user's session is still valid locally.
+    const localUsers = getLocalDB();
+    const existingIndex = localUsers.findIndex(u => u.discordUsername === user.discordUsername);
+
     if (existingIndex >= 0) {
-      // Update existing user
-      users[existingIndex] = { ...users[existingIndex], ...user };
+        localUsers[existingIndex] = user;
     } else {
-      // Add new user
-      users.push(user);
+        localUsers.push(user);
     }
-    
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(users));
-  },
+    saveLocalDB(localUsers);
 
-  // Calculate rank based on score
-  getRankedUsers: (region?: Region): User[] => {
-    let users = UserService.getAllUsers();
-    
-    if (region) {
-      users = users.filter(u => u.region === region);
+
+    // 2. Try Persisting to Backend
+    try {
+      await fetch(`${API_URL}/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(user)
+      });
+    } catch (e) {
+      console.warn('Backend unreachable during registration. Data saved locally only.');
     }
-
-    return users
-      .sort((a, b) => b.mindshareScore - a.mindshareScore)
-      .map((u, index) => ({ ...u, rank: index + 1 }));
   }
 };

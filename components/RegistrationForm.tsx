@@ -1,13 +1,12 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Region } from '../types';
 import { REGIONS } from '../constants';
-import { UserService } from '../storage';
-import { TwitterService } from '../twitter'; // Import Real Service
+import { UserService, SessionService } from '../storage';
+import { TwitterService } from '../twitter'; 
 import { 
   Disc, 
-  Twitter, 
   ArrowLeft, 
   Loader2, 
   CheckCircle2, 
@@ -17,9 +16,17 @@ import {
   Wifi, 
   ChevronRight,
   UserCircle2,
-  AlertTriangle,
-  AlertOctagon
+  AlertOctagon,
+  Scan,
+  Eye
 } from 'lucide-react';
+
+// Custom X Logo Component
+const XLogo = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" className={className}>
+    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+  </svg>
+);
 
 interface Props {
   selectedRegion: Region;
@@ -31,15 +38,15 @@ interface Props {
 export const RegistrationForm: React.FC<Props> = ({ selectedRegion, onBack, onComplete, t }) => {
   const [step, setStep] = useState<1 | 2>(1);
   const [discordId, setDiscordId] = useState('');
-  const [twitterHandle, setTwitterHandle] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
   const [statusLog, setStatusLog] = useState<string[]>(['> SYSTEM_INIT...', '> WAITING_FOR_USER_INPUT...']);
   const [copiedText, setCopiedText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   
-  // State for real user data preview
+  // Data from Backend Callback
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [realFollowers, setRealFollowers] = useState<number | null>(null);
+  const [calculatedPoints, setCalculatedPoints] = useState<number | null>(null);
   
   const regionConfig = REGIONS.find(r => r.id === selectedRegion);
 
@@ -47,13 +54,61 @@ export const RegistrationForm: React.FC<Props> = ({ selectedRegion, onBack, onCo
     setStatusLog(prev => [...prev.slice(-5), `> ${text}`]);
   };
 
-  const handleDiscordSubmit = (e: React.FormEvent) => {
+  // CHECK FOR OAUTH CALLBACK PARAMS ON MOUNT
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('status');
+
+    if (status === 'success') {
+        const dId = params.get('discordId');
+        const score = parseInt(params.get('score') || '0');
+        const handle = params.get('twitterHandle');
+        const avatar = params.get('avatarUrl');
+        const followers = parseInt(params.get('followers') || '0');
+        const region = params.get('region') as Region;
+
+        if (dId) {
+            setDiscordId(dId);
+            setStep(2); // Move to Step 2 visually
+            setPreviewImage(avatar);
+            setRealFollowers(followers);
+            setCalculatedPoints(score);
+            
+            addLog('OAUTH_CALLBACK_RECEIVED');
+            addLog(`IDENTITY: ${handle}`);
+            addLog(`IMPRESSIONS_SCANNED: ${score}`);
+            addLog('FINALIZING_REGISTRATION...');
+
+            // AUTO COMPLETE REGISTRATION
+            handleFinalRegistration({
+                id: crypto.randomUUID(),
+                discordUsername: dId,
+                twitterHandle: handle || '',
+                region: region || selectedRegion,
+                mindshareScore: score,
+                rank: 0,
+                avatarUrl: avatar || '',
+                followersCount: followers
+            });
+        }
+    } else if (status === 'error') {
+        setStep(2);
+        setError(params.get('message') || 'OAuth Failed');
+        addLog('CRITICAL: OAUTH_CONNECTION_FAILED');
+    }
+  }, []);
+
+  const handleDiscordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
     if (discordId.length > 2) {
-      // Check if user already exists
-      if (UserService.checkDiscordExists(discordId)) {
+      setIsConnecting(true);
+      // ASYNC: Check if user already exists via backend
+      const exists = await UserService.checkDiscordExists(discordId);
+      setIsConnecting(false);
+
+      if (exists) {
           setError(t('discord_error_duplicate'));
           addLog('ERROR: IDENTITY_ALREADY_REGISTERED');
           return;
@@ -65,89 +120,34 @@ export const RegistrationForm: React.FC<Props> = ({ selectedRegion, onBack, onCo
     }
   };
 
-  const handleTwitterConnect = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!twitterHandle) return;
-
+  // REAL OAUTH REDIRECT
+  const handleTwitterOAuth = () => {
     setIsConnecting(true);
     addLog('INITIATING_SECURE_HANDSHAKE...');
-    addLog('AUTHENTICATING_WITH_X_API_V2...');
+    addLog('REDIRECTING_TO_X_AUTH_GATEWAY...');
     
-    // REAL API CALL
-    try {
-        const userData = await TwitterService.getUserData(twitterHandle);
+    // Redirect browser to backend
+    const authUrl = TwitterService.getAuthUrl(discordId, selectedRegion);
+    window.location.href = authUrl;
+  };
 
-        if (userData && userData.data) {
-            const { profile_image_url, public_metrics, username } = userData.data;
-            const followers = public_metrics?.followers_count || 0;
-            
-            // Success Logic
-            addLog(`SUCCESS: USER_FOUND @${username.toUpperCase()}`);
-            addLog(`METRICS: ${followers} FOLLOWERS DETECTED`);
-            addLog('DOWNLOADING_BIOMETRICS...'); // Profile Image
-            
-            // Update Preview
-            if (profile_image_url) setPreviewImage(profile_image_url.replace('_normal', '_400x400')); // Get high res
-            setRealFollowers(followers);
-            
-            // Calculate Mindshare based on REAL data
-            // Base score 500 + 1 point per follower (capped or scaled) + random fluctuation
-            const baseScore = 500;
-            const influenceBonus = Math.min(followers * 0.5, 5000); // Cap influence bonus
-            const calculatedScore = Math.floor(baseScore + influenceBonus + (Math.random() * 100));
-            
-            addLog(`CALCULATING_MINDSHARE: ${calculatedScore}`);
-
-            // Wait a moment for visual effect
-            setTimeout(() => {
-                const newUser = {
-                    id: crypto.randomUUID(),
-                    discordUsername: discordId,
-                    twitterHandle: `@${username}`,
-                    region: selectedRegion,
-                    mindshareScore: calculatedScore,
-                    rank: 0,
-                    avatarUrl: profile_image_url?.replace('_normal', '_400x400') || `https://api.dicebear.com/7.x/avataaars/svg?seed=${discordId}`,
-                    followersCount: followers
-                };
-                
-                UserService.registerUser(newUser);
-                addLog('USER_REGISTERED_SUCCESSFULLY');
-                
-                setTimeout(() => {
-                    setIsConnecting(false);
-                    onComplete();
-                }, 800);
-            }, 1500);
-
-        } else {
-            // API Worked but user not found or error
-            throw new Error('User not found');
-        }
-
-    } catch (error) {
-        addLog('ERROR: CONNECTION_FAILED_OR_USER_INVALID');
-        addLog('FALLBACK_PROTOCOL_INITIATED...');
-        console.error(error);
-        
-        // Fallback for demo purposes if API quota exceeded or CORS hard block (though Proxy helps)
-        // We still register them but with base stats so the app doesn't break
+  const handleFinalRegistration = async (userData: any) => {
+      try {
+        await UserService.registerUser(userData);
+        SessionService.saveSession({
+            discordUsername: userData.discordUsername,
+            region: userData.region
+        });
+        addLog('USER_REGISTERED_SUCCESSFULLY');
         setTimeout(() => {
-             const newUser = {
-                id: crypto.randomUUID(),
-                discordUsername: discordId,
-                twitterHandle: twitterHandle.startsWith('@') ? twitterHandle : `@${twitterHandle}`,
-                region: selectedRegion,
-                mindshareScore: 500, // No bonus
-                rank: 0,
-                avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${discordId}`,
-                followersCount: 0
-            };
-            UserService.registerUser(newUser);
-            setIsConnecting(false);
+            // Clear URL params
+            window.history.replaceState({}, document.title, "/");
             onComplete();
         }, 2000);
-    }
+      } catch (e) {
+          setError("Registration Failed");
+          addLog("ERROR: DB_WRITE_FAILED");
+      }
   };
 
   const copyToClipboard = (text: string) => {
@@ -217,8 +217,16 @@ export const RegistrationForm: React.FC<Props> = ({ selectedRegion, onBack, onCo
                     <div className="flex justify-between items-center text-xs pb-2">
                         <span className="text-slate-500 uppercase tracking-wider">{t('mindshare')}</span>
                         <span className="font-mono text-slate-600">
-                            {realFollowers !== null ? (
-                                <span className="text-green-400">CALCULATING...</span>
+                            {realFollowers !== null && calculatedPoints === null ? (
+                                <span className="text-green-400 flex items-center gap-1">
+                                    <Scan className="w-3 h-3 animate-spin" />
+                                    CALC...
+                                </span>
+                            ) : calculatedPoints !== null ? (
+                                <span className="text-blue-400 font-bold text-sm flex items-center gap-1">
+                                    <Eye className="w-3 h-3" />
+                                    {calculatedPoints.toLocaleString()}
+                                </span>
                             ) : '--'}
                         </span>
                     </div>
@@ -231,14 +239,14 @@ export const RegistrationForm: React.FC<Props> = ({ selectedRegion, onBack, onCo
         </div>
 
         {/* System Log Terminal */}
-        <div className="mt-4 glass-panel rounded-xl p-4 font-mono text-[10px] text-slate-400 border border-white/5 h-40 overflow-hidden flex flex-col justify-end relative bg-black/50">
-             <div className="absolute top-2 right-3 text-[8px] text-slate-600">SYS_LOG_V2</div>
+        <div className="mt-4 glass-panel rounded-xl p-4 font-mono text-[10px] text-slate-400 border border-white/5 h-48 overflow-hidden flex flex-col justify-end relative bg-black/50">
+             <div className="absolute top-2 right-3 text-[8px] text-slate-600">SYS_LOG_V3 (REAL)</div>
              {statusLog.map((log, i) => (
                  <motion.div 
                     key={i} 
                     initial={{ opacity: 0, x: -10 }} 
                     animate={{ opacity: 1, x: 0 }}
-                    className={`${log.includes('ERROR') ? 'text-red-400' : log.includes('SUCCESS') ? 'text-green-400' : 'text-slate-400'}`}
+                    className={`mb-1 ${log.includes('ERROR') || log.includes('WARNING') || log.includes('CRITICAL') ? 'text-red-400' : log.includes('SUCCESS') || log.includes('DETECTED') ? 'text-green-400' : log.includes('CALLBACK') || log.includes('IMPRESSIONS') ? 'text-yellow-400' : 'text-slate-400'}`}
                  >
                      {log}
                  </motion.div>
@@ -297,12 +305,14 @@ export const RegistrationForm: React.FC<Props> = ({ selectedRegion, onBack, onCo
                                             setError(null);
                                         }}
                                         placeholder="username#0000"
+                                        disabled={isConnecting}
                                         className={`w-full bg-black/40 border rounded-xl py-5 pl-14 pr-4 text-white text-lg font-mono placeholder-slate-600 focus:outline-none transition-all shadow-inner ${error ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500/50' : 'border-white/10 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50'}`}
                                         required
                                         autoFocus
                                     />
                                     <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                                        {discordId.length > 2 && !error && <div className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_10px_#22c55e]" />}
+                                        {discordId.length > 2 && !error && !isConnecting && <div className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_10px_#22c55e]" />}
+                                        {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
                                     </div>
                                 </div>
                                 {error && (
@@ -319,10 +329,11 @@ export const RegistrationForm: React.FC<Props> = ({ selectedRegion, onBack, onCo
 
                             <button 
                                 type="submit"
-                                className="w-full py-5 bg-white text-black font-bold rounded-xl hover:bg-blue-50 transition-all uppercase tracking-widest font-display shadow-[0_0_20px_rgba(255,255,255,0.2)] flex items-center justify-center gap-3 group relative overflow-hidden"
+                                disabled={isConnecting}
+                                className="w-full py-5 bg-white text-black font-bold rounded-xl hover:bg-blue-50 transition-all uppercase tracking-widest font-display shadow-[0_0_20px_rgba(255,255,255,0.2)] flex items-center justify-center gap-3 group relative overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                <span className="relative z-10">{t('init_protocol')}</span>
-                                <ChevronRight className="w-5 h-5 relative z-10 group-hover:translate-x-1 transition-transform" />
+                                <span className="relative z-10">{isConnecting ? 'VERIFYING...' : t('init_protocol')}</span>
+                                {!isConnecting && <ChevronRight className="w-5 h-5 relative z-10 group-hover:translate-x-1 transition-transform" />}
                                 <div className="absolute inset-0 bg-blue-400/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                             </button>
                         </form>
@@ -411,33 +422,13 @@ export const RegistrationForm: React.FC<Props> = ({ selectedRegion, onBack, onCo
                              </div>
                         </div>
 
-                        {/* Input Form for Twitter */}
-                        <form onSubmit={handleTwitterConnect} className="mt-auto">
-                            <div className="relative group mb-4">
-                                <div className="relative">
-                                    <Twitter className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
-                                    <input 
-                                        type="text"
-                                        value={twitterHandle}
-                                        onChange={(e) => setTwitterHandle(e.target.value)}
-                                        placeholder="@yourhandle"
-                                        className="w-full bg-black/40 border border-white/10 rounded-xl py-4 pl-14 pr-4 text-white font-mono placeholder-slate-600 focus:outline-none focus:border-[#1DA1F2] focus:ring-1 focus:ring-[#1DA1F2]/50 transition-all shadow-inner"
-                                        required
-                                    />
-                                    {/* Real data indicator */}
-                                    <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                                         <span className="text-[10px] text-green-500 bg-green-900/20 border border-green-500/30 px-1.5 py-0.5 rounded uppercase tracking-wider flex items-center gap-1">
-                                            <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-                                            API V2
-                                         </span>
-                                    </div>
-                                </div>
-                            </div>
-
+                        {/* OAUTH BUTTON - REAL BACKEND REDIRECT */}
+                        <div className="mt-auto">
                             <button 
-                                type="submit"
+                                type="button"
+                                onClick={handleTwitterOAuth}
                                 disabled={isConnecting}
-                                className="w-full relative py-5 bg-[#1DA1F2] hover:bg-[#1a91da] disabled:bg-[#1DA1F2]/50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all uppercase tracking-widest font-display flex items-center justify-center gap-3 shadow-lg shadow-[#1DA1F2]/20 hover:scale-[1.01] active:scale-[0.99] overflow-hidden"
+                                className="w-full relative py-5 bg-black hover:bg-zinc-900 border border-white/10 hover:border-white/30 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all uppercase tracking-widest font-display flex items-center justify-center gap-3 shadow-lg overflow-hidden group"
                             >
                                 {isConnecting ? (
                                     <>
@@ -446,17 +437,23 @@ export const RegistrationForm: React.FC<Props> = ({ selectedRegion, onBack, onCo
                                     </>
                                 ) : (
                                     <>
-                                        <Twitter className="w-5 h-5 fill-white" />
-                                        <span>{t('auth_scan')}</span>
+                                        <XLogo className="w-5 h-5 text-white fill-white" />
+                                        <span>Connect with X (OAuth)</span>
                                     </>
                                 )}
                                 
-                                {/* Scanning light effect */}
                                 {isConnecting && (
                                     <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent w-1/2 skew-x-12 animate-[shimmer_1.5s_infinite]" />
                                 )}
                             </button>
-                        </form>
+                            
+                             {/* Help Text */}
+                            <div className="mt-3 text-center">
+                                <p className="text-[10px] text-slate-600 font-mono">
+                                    SECURE_OAUTH_GATEWAY_V3
+                                </p>
+                            </div>
+                        </div>
                     </motion.div>
                 )}
             </AnimatePresence>
