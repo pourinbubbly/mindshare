@@ -1,13 +1,18 @@
 
 import { User, Region } from './types';
 
-// CHANGED: Port 8080 -> 5000
-const API_URL = 'http://localhost:5000/api';
+// DYNAMIC API URL CONFIGURATION
+const getApiUrl = () => {
+    // Use relative path to leverage Vite Proxy
+    return '/api';
+};
+
+const API_URL = getApiUrl();
+
 const LOCAL_STORAGE_KEY = 'mindshare_nexus_db_v1';
 const SESSION_KEY = 'mindshare_nexus_session_v1';
 
 // Helper functions for LocalStorage Fallback
-// This ensures the app works even if the Node.js backend isn't running
 const getLocalDB = (): User[] => {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -101,7 +106,6 @@ export const UserService = {
   // Save a new user or update existing
   registerUser: async (user: User): Promise<void> => {
     // 1. ALWAYS save to LocalStorage first as a fail-safe.
-    // This ensures that if the backend fetch fails or hangs, the user's session is still valid locally.
     const localUsers = getLocalDB();
     const existingIndex = localUsers.findIndex(u => u.discordUsername === user.discordUsername);
 
@@ -111,7 +115,6 @@ export const UserService = {
         localUsers.push(user);
     }
     saveLocalDB(localUsers);
-
 
     // 2. Try Persisting to Backend
     try {

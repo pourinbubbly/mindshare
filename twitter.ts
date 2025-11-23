@@ -1,15 +1,26 @@
 
 // REAL TWITTER SERVICE
-// This service no longer simulates data.
-// It relies entirely on the Backend (server.js) to perform OAuth and Data fetching.
+// Utilizing the Vite Proxy in development to forward requests to Port 5000
 
-// CHANGED: Port 8080 -> 5000
-const BACKEND_URL = 'http://localhost:5000/api';
+export const getBackendUrl = () => {
+    // In development (with Vite Proxy) and Production, 
+    // we can now simply use the relative path '/api'
+    // The proxy (vite.config.ts) handles the redirection to localhost:5000
+    return '/api';
+};
 
 export const TwitterService = {
-  // The frontend no longer handles auth directly. 
-  // It redirects the browser to the backend OAuth endpoint.
   getAuthUrl: (discordId: string, region: string) => {
-      return `${BACKEND_URL}/auth/twitter?discordId=${encodeURIComponent(discordId)}&region=${encodeURIComponent(region)}`;
+      // Use relative path directly. 
+      // Browser will go to http://localhost:5173/api/auth/twitter
+      // Vite Proxy forwards to http://localhost:5000/api/auth/twitter
+      const safeUrl = `/api/auth/twitter`;
+      
+      const params = new URLSearchParams({
+          discordId: discordId,
+          region: region
+      });
+      
+      return `${safeUrl}?${params.toString()}`;
   }
 };

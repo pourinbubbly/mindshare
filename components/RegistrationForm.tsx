@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Region } from '../types';
 import { REGIONS } from '../constants';
 import { UserService, SessionService } from '../storage';
-import { TwitterService } from '../twitter'; 
+import { TwitterService, getBackendUrl } from '../twitter'; 
 import { 
   Disc, 
   ArrowLeft, 
@@ -18,7 +18,9 @@ import {
   UserCircle2,
   AlertOctagon,
   Scan,
-  Eye
+  Eye,
+  ExternalLink,
+  Server
 } from 'lucide-react';
 
 // Custom X Logo Component
@@ -42,7 +44,12 @@ export const RegistrationForm: React.FC<Props> = ({ selectedRegion, onBack, onCo
   const [statusLog, setStatusLog] = useState<string[]>(['> SYSTEM_INIT...', '> WAITING_FOR_USER_INPUT...']);
   const [copiedText, setCopiedText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isIframe, setIsIframe] = useState(false);
   
+  // Backend Diagnostics
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'offline'>('checking');
+  const [detectedBackendUrl, setDetectedBackendUrl] = useState('');
+
   // Data from Backend Callback
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [realFollowers, setRealFollowers] = useState<number | null>(null);
@@ -53,6 +60,40 @@ export const RegistrationForm: React.FC<Props> = ({ selectedRegion, onBack, onCo
   const addLog = (text: string) => {
     setStatusLog(prev => [...prev.slice(-5), `> ${text}`]);
   };
+
+  // Check if running in iframe (Preview Mode)
+  useEffect(() => {
+    try {
+        setIsIframe(window.self !== window.top);
+    } catch (e) {
+        setIsIframe(true);
+    }
+  }, []);
+
+  // CHECK BACKEND HEALTH ON MOUNT
+  useEffect(() => {
+      const checkBackend = async () => {
+          const url = getBackendUrl();
+          setDetectedBackendUrl(url);
+          try {
+              // Ping backend health endpoint
+              // We replace /api with /api/health, removing trailing slashes
+              const healthUrl = url.replace(/\/$/, '') + '/health';
+              const res = await fetch(healthUrl);
+              if (res.ok) {
+                  setBackendStatus('online');
+                  addLog('SYSTEM_CHECK: BACKEND_ONLINE');
+              } else {
+                  setBackendStatus('offline');
+                  addLog('SYSTEM_CHECK: BACKEND_UNREACHABLE');
+              }
+          } catch (e) {
+              setBackendStatus('offline');
+              addLog('SYSTEM_CHECK: BACKEND_CONNECTION_FAILED');
+          }
+      };
+      checkBackend();
+  }, []);
 
   // CHECK FOR OAUTH CALLBACK PARAMS ON MOUNT
   useEffect(() => {
@@ -128,6 +169,8 @@ export const RegistrationForm: React.FC<Props> = ({ selectedRegion, onBack, onCo
     
     // Redirect browser to backend
     const authUrl = TwitterService.getAuthUrl(discordId, selectedRegion);
+    
+    // Direct navigation
     window.location.href = authUrl;
   };
 
@@ -262,6 +305,30 @@ export const RegistrationForm: React.FC<Props> = ({ selectedRegion, onBack, onCo
          animate={{ x: 0, opacity: 1 }}
          className="w-full md:w-2/3"
       >
+         {/* BACKEND HEALTH ALERT */}
+         {backendStatus === 'offline' && (
+             <motion.div 
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-6 bg-red-500/10 border border-red-500/40 rounded-xl p-4 flex flex-col gap-2"
+             >
+                 <div className="flex items-center gap-2 text-red-400 font-bold font-display tracking-wider">
+                     <Server className="w-5 h-5" />
+                     BACKEND OFFLINE DETECTED
+                 </div>
+                 <p className="text-xs text-red-300/80 font-mono leading-relaxed">
+                     The connection to the authentication server failed. This usually happens because the backend server is not running or is on a different port.
+                 </p>
+                 <div className="mt-2 p-2 bg-black/40 rounded border border-red-500/20">
+                     <p className="text-[10px] text-slate-400 font-mono mb-1">TARGETING URL:</p>
+                     <code className="text-xs text-yellow-400 font-mono break-all">{detectedBackendUrl}</code>
+                 </div>
+                 <p className="text-[10px] text-slate-500 mt-1">
+                     Solution: Ensure <code>node server.js</code> is running in your terminal.
+                 </p>
+             </motion.div>
+         )}
+
          <div className="glass-panel rounded-2xl p-8 md:p-10 border border-white/10 relative overflow-hidden min-h-[500px] flex flex-col">
             
             {/* Header */}
@@ -422,13 +489,34 @@ export const RegistrationForm: React.FC<Props> = ({ selectedRegion, onBack, onCo
                              </div>
                         </div>
 
+                        {/* IFRAME WARNING BANNER */}
+                        {isIframe && (
+                            <motion.div 
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="mb-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-yellow-200/90 text-[10px] font-mono flex items-start gap-3"
+                            >
+                                <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5 text-yellow-500" />
+                                <div>
+                                    <strong className="block text-yellow-400 mb-1">SECURITY PROTOCOL WARNING</strong>
+                                    X (Twitter) blocks authentication inside the IDE preview window.
+                                    <br />
+                                    Please open the deployed application URL in a <strong>New Tab</strong> to complete this step.
+                                    <br />
+                                    <a href={window.location.href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 mt-2 text-blue-400 hover:text-blue-300 underline">
+                                        Open in New Tab <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                </div>
+                            </motion.div>
+                        )}
+
                         {/* OAUTH BUTTON - REAL BACKEND REDIRECT */}
                         <div className="mt-auto">
                             <button 
                                 type="button"
                                 onClick={handleTwitterOAuth}
-                                disabled={isConnecting}
-                                className="w-full relative py-5 bg-black hover:bg-zinc-900 border border-white/10 hover:border-white/30 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all uppercase tracking-widest font-display flex items-center justify-center gap-3 shadow-lg overflow-hidden group"
+                                disabled={isConnecting || isIframe || backendStatus === 'offline'}
+                                className={`w-full relative py-5 bg-black hover:bg-zinc-900 border border-white/10 hover:border-white/30 text-white font-bold rounded-xl transition-all uppercase tracking-widest font-display flex items-center justify-center gap-3 shadow-lg overflow-hidden group ${isIframe || backendStatus === 'offline' ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 {isConnecting ? (
                                     <>
