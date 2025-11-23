@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Region } from '../types';
 import { REGIONS } from '../constants';
@@ -12,13 +12,22 @@ interface Props {
 
 export const RegionSelector: React.FC<Props> = ({ onSelect, t }) => {
   const [selectedId, setSelectedId] = useState<Region | null>(null);
+  const timeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleSelect = (id: Region) => {
     if (selectedId) return; // Prevent multiple selections
     setSelectedId(id);
     
     // Delay navigation to show confirmation animation
-    setTimeout(() => {
+    timeoutRef.current = setTimeout(() => {
       onSelect(id);
     }, 1000);
   };
